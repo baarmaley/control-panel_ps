@@ -1,0 +1,3 @@
+[submodule "my_smart_power"]
+	path = my_smart_power
+	url = H:/esp8266/arduino_freamwork/my_smart_power
