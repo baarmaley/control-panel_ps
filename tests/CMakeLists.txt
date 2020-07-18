@@ -24,5 +24,6 @@ target_include_directories(protocol_tests
 target_link_libraries(protocol_tests
         PRIVATE
         tsvetkov::protocol
+        tsvetkov::control_panel_library
         Boost::boost
         Catch2::Catch2)
