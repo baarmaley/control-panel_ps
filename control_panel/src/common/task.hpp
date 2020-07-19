@@ -4,10 +4,9 @@
 
 #pragma once
 
-//#include <system_error>
 #include <boost/system/error_code.hpp>
 
-#include "function_traits.hpp"
+#include "common/function_traits.hpp"
 
 namespace tsvetkov {
 namespace details {

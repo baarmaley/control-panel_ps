@@ -4,6 +4,7 @@ project(control_panel VERSION 0.1 LANGUAGES CXX)
 
 find_package(Boost)
 find_package(cxxopts CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 
 file(GLOB_RECURSE TARGET_SOURCES
@@ -30,9 +31,13 @@ target_include_directories(control_panel
 target_include_directories(control_panel_library
         PUBLIC src)
 
+target_link_libraries(control_panel_library
+        PUBLIC
+        tsvetkov::protocol
+        Boost::boost
+        Threads::Threads)
+
 target_link_libraries(control_panel
         PRIVATE
-        tsvetkov::protocol
         tsvetkov::control_panel_library
-        Boost::boost
         cxxopts::cxxopts)

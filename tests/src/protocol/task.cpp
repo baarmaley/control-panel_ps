@@ -2,9 +2,9 @@
 // Created by m.tsvetkov on 13.07.2020.
 //
 
-#include <catch2/catch.hpp>
+#include "common/task.hpp"
 #include <boost/system/error_code.hpp>
-#include "task.hpp"
+#include <catch2/catch.hpp>
 
 TEST_CASE("Task test"){
     auto my_task = tsvetkov::make_asio_task([](std::string, std::size_t){}, [](const boost::system::error_code&){});
@@ -15,5 +15,4 @@ TEST_CASE("Task test"){
 
     auto my_task_2 = tsvetkov::make_asio_task([](std::string){}, [](const boost::system::error_code&){});
     my_task_2(error_code, str);
-    std::tuple<std::string> t;
 }

@@ -4,8 +4,9 @@
 
 #include <catch2/catch.hpp>
 
-#include "function_traits.hpp"
+#include "common/function_traits.hpp"
 
+namespace {
 void void_function(double, std::size_t) {}
 
 std::size_t size_t_function(double, std::size_t)
@@ -22,7 +23,7 @@ struct Foo
     }
     void void_const_method(const std::string&, std::size_t) const {}
 };
-
+}
 TEST_CASE("Function traits")
 {
     namespace traits = tsvetkov::traits;
