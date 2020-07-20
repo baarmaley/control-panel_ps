@@ -41,8 +41,8 @@ int main(int argc, char** argv)
         std::cout << "Client ip:" << remote_address << std::endl;
 
         asio::io_context io;
-        tsvetkov::Client client(io, remote_address, port);
-        client.connect();
+        auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
+        client->connect();
         io.run();
     } catch (const std::exception& e) {
         std::cout << "Error: " << e.what() << std::endl;
