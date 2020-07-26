@@ -11,12 +11,20 @@
 #include "common/task.hpp"
 #include "protocol/protocol.hpp"
 
-#include <functional>
 #include <iostream>
 #include <memory>
 
 namespace protocol = tsvetkov::protocol;
 namespace asio = boost::asio;
+
+// TODO:
+// 1. Добавить пинг
+// 1. Добавить протокол обнаружения устройств
+// 1. Cохранение параметров в фс на устройстве
+// 1. Добавить переподключение к устройству
+// 1. Добавить меню
+// 1. Оформить как библиотеку
+
 
 int main(int argc, char** argv)
 {

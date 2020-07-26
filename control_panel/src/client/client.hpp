@@ -6,7 +6,7 @@
 
 #include "boost/asio.hpp"
 
-#include "protocol/protocol.hpp"
+#include "protocol/command_handler.hpp"
 
 namespace tsvetkov{
 namespace asio = boost::asio;

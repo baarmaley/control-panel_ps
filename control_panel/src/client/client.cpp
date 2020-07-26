@@ -32,6 +32,14 @@ Client::Client(asio::io_context& io, const std::string& remote_address, std::uin
         std::cout << "hello_response.low_device_id: " << hello_response.low_device_id << std::endl;
         std::cout << "hello_response.high_device_id: " << hello_response.high_device_id << std::endl;
     });
+    commandHandler.subscribe([](protocol::SmartPowerStatus smart_power_status) {
+        std::cout << "Status notification" << std::endl;
+        for (const auto& item : smart_power_status.status) {
+            std::cout << "smart_power_status, pin: " << static_cast<int>(item.first)
+                      << " status: " << (item.second == protocol::SmartPowerStatus::Status::On ? "On" : "Off")
+                      << std::endl;
+        }
+    });
 }
 
 void Client::connect()
@@ -79,46 +87,31 @@ void Client::async_read()
                 make_single_context(shared_from_this()),
                 [](Client* client, std::size_t bytes_transferred) {
                     std::cout << "async_read, bytes_transferred: " << bytes_transferred << std::endl;
-                    auto push_back_buffer = [&] {
-                        client->accumulate_incoming_buffer.append(&client->incoming_buffer[0], bytes_transferred);
-                    };
-                    // size packet
-                    if (client->accumulate_incoming_buffer.size() + bytes_transferred <
-                        protocol::Message::packet_size) {
-                        push_back_buffer();
-                        client->async_read();
-                        return;
-                    }
-                    if (!client->accumulate_incoming_buffer.empty()) {
-                        push_back_buffer();
-                    }
 
-                    auto buffer = client->accumulate_incoming_buffer.empty()
-                                      ? &client->incoming_buffer[0]
-                                      : client->accumulate_incoming_buffer.c_str();
+                    client->accumulate_incoming_buffer.append(&client->incoming_buffer[0], bytes_transferred);
 
-                    auto buffer_size = client->accumulate_incoming_buffer.empty()
-                                           ? bytes_transferred
-                                           : client->accumulate_incoming_buffer.size();
-
-                    auto size_packet = protocol::expected_packet_size(&buffer[0]);
-
-                    if (size_packet > buffer_size) {
-                        if (client->accumulate_incoming_buffer.empty()) {
-                            push_back_buffer();
+                    while(true) {
+                        // size packet
+                        if (client->accumulate_incoming_buffer.size() < protocol::Message::packet_size) {
+                            break;
                         }
-                        client->async_read();
-                        return;
-                    }
 
-                    auto ec = client->commandHandler.parse(buffer, buffer_size);
-                    if (client->accumulate_incoming_buffer.empty()) {
-                        client->accumulate_incoming_buffer.erase(0, size_packet);
-                    }
-                    if (ec) {
-                        std::cout << "async_read, parse failed: " << ec << ": " << ec.message() << std::endl;
-                        client->disconnect();
-                        return;
+                        auto data = &client->accumulate_incoming_buffer[0];
+                        auto size_packet = protocol::expected_packet_size(data);
+
+                        if (size_packet > client->accumulate_incoming_buffer.size()) {
+                            break;
+                        }
+
+                        auto ec = client->commandHandler.parse(data, client->accumulate_incoming_buffer.size());
+                        if (!client->accumulate_incoming_buffer.empty()) {
+                            client->accumulate_incoming_buffer.erase(0, size_packet);
+                        }
+                        if (ec) {
+                            std::cout << "async_read, parse failed: " << ec << ": " << ec.message() << std::endl;
+                            client->disconnect();
+                            return;
+                        }
                     }
                     client->async_read();
                 }),

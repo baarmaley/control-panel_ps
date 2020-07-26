@@ -5,7 +5,7 @@
 #include "boost/endian/conversion.hpp"
 #include "catch2/catch.hpp"
 
-#include "protocol/protocol.hpp"
+#include "protocol/command_handler.hpp"
 
 namespace protocol = tsvetkov::protocol;
 
@@ -67,7 +67,7 @@ TEST_CASE("protocol test")
     status.emplace(std::uint8_t{3}, protocol::SmartPowerStatus::Status::Off);
 
     auto smart_power_notification_buffer =
-        protocol::make_smart_power_notification(smart_power_notification_error, 77778888, status);
+        protocol::make_smart_power_notification(smart_power_notification_error, status);
 
     for (std::uint8_t i = 4; i < 255; ++i) {
         status.emplace(i, protocol::SmartPowerStatus::Status::On);
@@ -75,29 +75,25 @@ TEST_CASE("protocol test")
 
     protocol::Error overflow_smart_power_notification_error = protocol::Error::NoError;
     auto overflow_smart_power_notification_buffer =
-        protocol::make_smart_power_notification(overflow_smart_power_notification_error, 88887777, status);
+        protocol::make_smart_power_notification(overflow_smart_power_notification_error, status);
     REQUIRE(overflow_smart_power_notification_error == protocol::Error::OverflowBuffer);
 
     REQUIRE(smart_power_notification_error == protocol::Error::NoError);
 
     bool trigger_smart_power_status_notification     = false;
-    std::uint32_t smart_power_status_notification_id = 0;
 
     protocol::SmartPowerStatus original_smart_power_status_notification;
 
     command_handler.subscribe(
         [&trigger_smart_power_status_notification,
-         &smart_power_status_notification_id,
-         &original_smart_power_status_notification](std::uint32_t id, protocol::SmartPowerStatus notification) {
+         &original_smart_power_status_notification](protocol::SmartPowerStatus notification) {
             trigger_smart_power_status_notification  = true;
-            smart_power_status_notification_id       = id;
             original_smart_power_status_notification = std::move(notification);
         });
 
-    command_handler.parse(&smart_power_notification_buffer.buffer[0], smart_power_notification_buffer.size);
+    command_handler.parse(smart_power_notification_buffer.data(), smart_power_notification_buffer.size());
 
     REQUIRE(trigger_smart_power_status_notification);
-    REQUIRE(smart_power_status_notification_id == 77778888);
     REQUIRE(original_smart_power_status_notification.status.size() == 4);
 
     auto check_smart_power_status = [&](std::uint8_t pin, protocol::SmartPowerStatus::Status pin_status) {
