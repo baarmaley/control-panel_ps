@@ -4,46 +4,249 @@
 
 #pragma once
 
+#include <mutex>
+
+#include <boost/optional.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/variant.hpp>
+#include <type_traits>
 
 #include "common/function_traits.hpp"
 
 namespace tsvetkov {
 namespace details {
-template<typename CompleteF, typename ErrorF, typename Tuple>
+template<typename CompleteF, typename ErrorF, typename ErrorType, typename Tuple>
 struct HelperCallTask
 {
 };
+// variant<ReturnType, ErrorType> future(task) result
+// variant<ReturnType, ErrorType> -> optional<ReturnType> erasure error
+// for void
+// variant<void, ErrorType> -> optional<ErrorType>: Success: boost::none, Error: ErrorType
+// erasure error               bool                 Success: true       , Error: false
 
-template<typename CompleteF, typename ErrorF, typename... Args>
-struct HelperCallTask<CompleteF, ErrorF, std::tuple<Args...>>
+template<typename SuccessType,
+         typename ErrorType,
+         typename SuccessF,
+         typename ErrorF,
+         typename SuccessArgs,
+         typename ErrorArgs>
+struct ResultTask
 {
-    HelperCallTask(CompleteF&& _complete, ErrorF&& _error) : _complete(std::move(_complete)), _error(std::move(_error))
+};
+
+template<typename ErrorType, typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
+struct ResultTask<void, ErrorType, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+{
+    using result_task_type = boost::optional<ErrorType>;
+
+    ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
+
+    void success(SuccessArgs... args)
     {
+        success_f(std::forward<SuccessArgs>(args)...);
     }
 
-    void operator()(const boost::system::error_code& ec, Args... args)
+    void error(ErrorArgs... args)
     {
-        if (ec) {
-            _error(ec);
+        result_task = error_f(std::forward<ErrorArgs>(args)...);
+    }
+
+    SuccessF success_f;
+    ErrorF error_f;
+
+    result_task_type result_task;
+};
+
+template<typename SuccessType, typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
+struct ResultTask<SuccessType, void, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+{
+    using result_task_type = boost::optional<SuccessType>;
+
+    ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
+
+    void success(SuccessArgs... args)
+    {
+        result_task = success_f(std::forward<SuccessArgs>(args)...);
+    }
+
+    void error(ErrorArgs... args)
+    {
+        error_f(std::forward<ErrorArgs>(args)...);
+    }
+
+    SuccessF success_f;
+    ErrorF error_f;
+
+    result_task_type result_task;
+};
+
+template<typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
+struct ResultTask<void, void, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+{
+    ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
+
+    void success(SuccessArgs... args)
+    {
+        success_f(std::forward<SuccessArgs>(args)...);
+    }
+
+    void error(ErrorArgs... args)
+    {
+        error_f(std::forward<ErrorArgs>(args)...);
+    }
+
+    SuccessF success_f;
+    ErrorF error_f;
+};
+
+template<typename SuccessType,
+         typename ErrorType,
+         typename SuccessF,
+         typename ErrorF,
+         typename... SuccessArgs,
+         typename... ErrorArgs>
+struct ResultTask<SuccessType, ErrorType, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+{
+    using result_task_type = boost::variant<SuccessType, ErrorType>;
+
+    ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
+
+    void success(SuccessArgs... args)
+    {
+        result_task = success_f(std::forward<SuccessArgs>(args)...);
+    }
+
+    void error(ErrorArgs... args)
+    {
+        result_task = error_f(std::forward<ErrorArgs>(args)...);
+    }
+
+    SuccessF success_f;
+    ErrorF error_f;
+
+    result_task_type result_task;
+};
+
+template<typename SuccessF, typename ErrorF, typename SuccessArgs, typename ErrorArgs>
+struct SharedStateTask
+{
+};
+
+template<typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
+struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+{
+    using success_return_type = typename tsvetkov::traits::function_traits<SuccessF>::return_type;
+    using error_return_type   = typename tsvetkov::traits::function_traits<ErrorF>::return_type;
+
+    using result_task_type = ResultTask<success_return_type,
+                                        error_return_type,
+                                        SuccessF,
+                                        ErrorF,
+                                        std::tuple<SuccessArgs...>,
+                                        std::tuple<ErrorArgs...>>;
+
+    SharedStateTask(SuccessF&& success_f, ErrorF&& error_f) : m_result_task(std::move(success_f), std::move(error_f)) {}
+
+    void success(SuccessArgs... args)
+    {
+        std::lock_guard lock_guard(m_mutex);
+        if (impl_is_ready() || impl_is_cancel()) {
             return;
         }
-        _complete(std::forward<Args>(args)...);
+        m_result_task.success(std::forward<SuccessArgs>(args)...);
+        m_is_ready = true;
+    }
+
+    void error(ErrorArgs... args)
+    {
+        std::lock_guard lock_guard(m_mutex);
+        if (impl_is_ready() || impl_is_cancel()) {
+            return;
+        }
+        m_result_task.error(std::forward<ErrorArgs>(args)...);
+        m_is_ready = true;
+    }
+
+    bool cancel(ErrorArgs... args) {
+        std::lock_guard lock_guard(m_mutex);
+        if(impl_is_ready() || impl_is_cancel()){
+            return false;
+        }
+        m_result_task.error(std::forward<ErrorArgs>(args)...);
+        m_is_ready = true;
+        m_is_cancel = true;
+        return true;
+    }
+
+    bool is_ready() const
+    {
+        std::lock_guard lock_guard(m_mutex);
+        return impl_is_ready();
+    }
+
+    bool is_cancel() const
+    {
+        std::lock_guard lock_guard(m_mutex);
+        return impl_is_cancel();
     }
 
 private:
-    CompleteF _complete;
-    ErrorF _error;
+    bool impl_is_ready() const
+    {
+        return m_is_ready;
+    }
+
+    bool impl_is_cancel() const
+    {
+        return m_is_cancel;
+    }
+
+    std::mutex m_mutex;
+    result_task_type m_result_task;
+    bool m_is_ready  = false;
+    bool m_is_cancel = false;
+};
+
+template<typename SuccessF, typename ErrorF, typename ErrorType, typename... SuccessArgs>
+struct HelperCallTask<SuccessF, ErrorF, ErrorType, std::tuple<SuccessArgs...>>
+{
+    using error_arguments = typename tsvetkov::traits::function_traits<ErrorF>::arguments;
+
+    using shared_state_task_type =
+        details::SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, error_arguments>;
+
+    HelperCallTask(SuccessF&& complete, ErrorF&& error)
+        : shared_state_task(std::make_shared<shared_state_task_type>(std::move(complete), std::move(error)))
+    {
+    }
+
+    void operator()(const ErrorType& ec, SuccessArgs... args)
+    {
+        if (ec) {
+            shared_state_task->error(ec);
+            return;
+        }
+        shared_state_task->success(std::forward<SuccessArgs>(args)...);
+    }
+
+private:
+    std::shared_ptr<shared_state_task_type> shared_state_task;
 };
 } // namespace details
 
 template<typename CompleteF, typename ErrorF>
-struct AsioTask
-    : details::HelperCallTask<CompleteF, ErrorF, typename tsvetkov::traits::function_traits<CompleteF>::arguments>
+struct AsioTask : details::HelperCallTask<CompleteF,
+                                          ErrorF,
+                                          boost::system::error_code,
+                                          typename tsvetkov::traits::function_traits<CompleteF>::arguments>
 {
-    AsioTask(CompleteF&& _complete, ErrorF&& _error)
-        : details::HelperCallTask<CompleteF, ErrorF, typename tsvetkov::traits::function_traits<CompleteF>::arguments>(
-              std::move(_complete), std::move(_error))
+    AsioTask(CompleteF&& complete, ErrorF&& error)
+        : details::HelperCallTask<CompleteF,
+                                  ErrorF,
+                                  boost::system::error_code,
+                                  typename tsvetkov::traits::function_traits<CompleteF>::arguments>(std::move(complete),
+                                                                                                    std::move(error))
     {
     }
 
@@ -51,8 +254,8 @@ struct AsioTask
 };
 
 template<typename CompleteF, typename ErrorF>
-AsioTask<CompleteF, ErrorF> make_asio_task(CompleteF&& _complete, ErrorF&& _error)
+AsioTask<CompleteF, ErrorF> make_asio_task(CompleteF&& complete, ErrorF&& error)
 {
-    return AsioTask<CompleteF, ErrorF>(std::move(_complete), std::move(_error));
+    return AsioTask<CompleteF, ErrorF>(std::forward<CompleteF>(complete), std::forward<ErrorF>(error));
 }
 } // namespace tsvetkov

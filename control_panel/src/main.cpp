@@ -8,14 +8,15 @@
 #include <cxxopts.hpp>
 
 #include "client/client.hpp"
-#include "common/task.hpp"
+#include "menu/menu.hpp"
 #include "protocol/protocol.hpp"
 
 #include <iostream>
 #include <memory>
+#include <thread>
 
 namespace protocol = tsvetkov::protocol;
-namespace asio = boost::asio;
+namespace asio     = boost::asio;
 
 // TODO:
 // 1. Добавить пинг
@@ -24,7 +25,6 @@ namespace asio = boost::asio;
 // 1. Добавить переподключение к устройству
 // 1. Добавить меню
 // 1. Оформить как библиотеку
-
 
 int main(int argc, char** argv)
 {
@@ -49,9 +49,41 @@ int main(int argc, char** argv)
         std::cout << "Client ip:" << remote_address << std::endl;
 
         asio::io_context io;
+
+        tsvetkov::Menu menu;
+        auto get_number = [] {
+            std::string i;
+            std::getline(std::cin, i);
+            return static_cast<std::uint32_t>(std::stoi(i));
+        };
+
         auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
-        client->connect();
-        io.run();
+
+        menu.add_item("All On", [&client, &io] { io.post([&client] { client->send_all_on(); }); });
+        menu.add_item("All Off", [&client, &io] { io.post([&client] { client->send_all_off(); }); });
+
+        menu.add_item("Inversion", [&client, &io, &get_number] {
+            std::cout << "Enter pin: ";
+            std::size_t pin = get_number();
+            io.post([&client, pin] { client->inversion(pin); });
+        });
+
+        auto worker = std::thread([&] {
+            client->connect();
+            io.run();
+        });
+
+        bool is_continue = true;
+
+        while (is_continue) {
+            std::cout << menu.str();
+            std::size_t i = get_number();
+            std::cout << "selected: " << i << std::endl;
+            menu.item(i);
+        }
+
+        worker.join();
+
     } catch (const std::exception& e) {
         std::cout << "Error: " << e.what() << std::endl;
     }
