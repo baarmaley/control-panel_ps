@@ -128,6 +128,38 @@ struct ResultTask<SuccessType, ErrorType, SuccessF, ErrorF, std::tuple<SuccessAr
     result_task_type result_task;
 };
 
+template<typename F, typename MapF, typename ReturnType, typename ArgsF>
+struct Transform
+{
+};
+
+template<typename F, typename MapF, typename ReturnType, typename... ArgsF>
+struct Transform<F, MapF, ReturnType, std::tuple<ArgsF...>>
+{
+    using map_return_type = typename tsvetkov::traits::function_traits<MapF>::return_type;
+
+    static auto map(F&& f, MapF&& map_f)
+    {
+        return [f = std::forward<F>(f), map_f = std::forward<MapF>(map_f)](ArgsF... args) -> map_return_type {
+            return map_f(f(std::forward<ArgsF>(args)...));
+        };
+    }
+};
+
+template<typename F, typename MapF, typename... ArgsF>
+struct Transform<F, MapF, void, std::tuple<ArgsF...>>
+{
+    using map_return_type = typename tsvetkov::traits::function_traits<MapF>::return_type;
+
+    static auto map(F&& f, MapF&& map_f)
+    {
+        return [f = std::forward<F>(f), map_f = std::forward<MapF>(map_f)](ArgsF... args) -> map_return_type {
+            f(std::forward<ArgsF>(args)...);
+            return map_f();
+        };
+    }
+};
+
 template<typename SuccessF, typename ErrorF, typename SuccessArgs, typename ErrorArgs>
 struct SharedStateTask
 {
@@ -138,6 +170,8 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
 {
     using success_return_type = typename tsvetkov::traits::function_traits<SuccessF>::return_type;
     using error_return_type   = typename tsvetkov::traits::function_traits<ErrorF>::return_type;
+    using success_f_type      = SuccessF;
+    using error_f_type        = ErrorF;
 
     using result_task_type = ResultTask<success_return_type,
                                         error_return_type,
@@ -168,13 +202,14 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
         m_is_ready = true;
     }
 
-    bool cancel(ErrorArgs... args) {
+    bool cancel(ErrorArgs... args)
+    {
         std::lock_guard lock_guard(m_mutex);
-        if(impl_is_ready() || impl_is_cancel()){
+        if (impl_is_ready() || impl_is_cancel()) {
             return false;
         }
         m_result_task.error(std::forward<ErrorArgs>(args)...);
-        m_is_ready = true;
+        m_is_ready  = true;
         m_is_cancel = true;
         return true;
     }
@@ -189,6 +224,21 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
     {
         std::lock_guard lock_guard(m_mutex);
         return impl_is_cancel();
+    }
+
+    template<typename SuccessThen, typename ErrorThen>
+    auto then(SuccessThen&& success_then, ErrorThen&& error_then)
+    {
+        auto success_map = Transform<SuccessF, SuccessThen, success_return_type, std::tuple<SuccessArgs...>>::map(
+            std::move(m_result_task.success_f), std::forward<SuccessThen>(success_then));
+        auto error_map = Transform<ErrorF, ErrorThen, error_return_type, std::tuple<ErrorArgs...>>::map(
+            std::move(m_result_task.error_f), std::forward<ErrorThen>(error_then));
+
+        return std::make_shared<SharedStateTask<decltype(success_map),
+                                                decltype(error_map),
+                                                std::tuple<SuccessArgs...>,
+                                                std::tuple<ErrorArgs...>>>(std::move(success_map),
+                                                                           std::move(error_map));
     }
 
 private:
@@ -219,6 +269,22 @@ struct HelperCallTask<SuccessF, ErrorF, ErrorType, std::tuple<SuccessArgs...>>
     HelperCallTask(SuccessF&& complete, ErrorF&& error)
         : shared_state_task(std::make_shared<shared_state_task_type>(std::move(complete), std::move(error)))
     {
+    }
+
+    explicit HelperCallTask(std::shared_ptr<shared_state_task_type>&& shared_state_task)
+        : shared_state_task(std::move(shared_state_task))
+    {
+    }
+
+    template<typename SuccessThen, typename ErrorThen>
+    auto then(SuccessThen&& success_then, ErrorThen&& error_then) &&
+    {
+        auto then_shared_state_task =
+            shared_state_task->then(std::forward<SuccessThen>(success_then), std::forward<ErrorThen>(error_then));
+        return HelperCallTask<typename decltype(then_shared_state_task)::element_type::success_f_type,
+                              typename decltype(then_shared_state_task)::element_type::error_f_type,
+                              ErrorType,
+                              std::tuple<SuccessArgs...>>(std::move(then_shared_state_task));
     }
 
     void operator()(const ErrorType& ec, SuccessArgs... args)
