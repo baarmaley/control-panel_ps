@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <mutex>
 
 #include <boost/optional.hpp>
@@ -38,7 +39,7 @@ struct ResultTask
 template<typename ErrorType, typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
 struct ResultTask<void, ErrorType, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
 {
-    using result_task_type = boost::optional<ErrorType>;
+    using result_type = boost::optional<ErrorType>;
 
     ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
 
@@ -55,13 +56,13 @@ struct ResultTask<void, ErrorType, SuccessF, ErrorF, std::tuple<SuccessArgs...>,
     SuccessF success_f;
     ErrorF error_f;
 
-    result_task_type result_task;
+    result_type result_task;
 };
 
 template<typename SuccessType, typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
 struct ResultTask<SuccessType, void, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
 {
-    using result_task_type = boost::optional<SuccessType>;
+    using result_type = boost::optional<SuccessType>;
 
     ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
 
@@ -78,12 +79,14 @@ struct ResultTask<SuccessType, void, SuccessF, ErrorF, std::tuple<SuccessArgs...
     SuccessF success_f;
     ErrorF error_f;
 
-    result_task_type result_task;
+    result_type result_task;
 };
 
 template<typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
 struct ResultTask<void, void, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
 {
+    using result_type = void;
+
     ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
 
     void success(SuccessArgs... args)
@@ -108,7 +111,7 @@ template<typename SuccessType,
          typename... ErrorArgs>
 struct ResultTask<SuccessType, ErrorType, SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
 {
-    using result_task_type = boost::variant<SuccessType, ErrorType>;
+    using result_type = boost::variant<SuccessType, ErrorType>;
 
     ResultTask(SuccessF&& success_f, ErrorF&& error_f) : success_f(std::move(success_f)), error_f(std::move(error_f)) {}
 
@@ -125,7 +128,7 @@ struct ResultTask<SuccessType, ErrorType, SuccessF, ErrorF, std::tuple<SuccessAr
     SuccessF success_f;
     ErrorF error_f;
 
-    result_task_type result_task;
+    result_type result_task;
 };
 
 template<typename F, typename MapF, typename ReturnType, typename ArgsF>
@@ -209,7 +212,6 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
             return false;
         }
         m_result_task.error(std::forward<ErrorArgs>(args)...);
-        m_is_ready  = true;
         m_is_cancel = true;
         return true;
     }
@@ -226,13 +228,13 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
         return impl_is_cancel();
     }
 
-    template<typename SuccessThen, typename ErrorThen>
-    auto then(SuccessThen&& success_then, ErrorThen&& error_then)
+    template<typename SuccessMap, typename ErrorMap>
+    auto map(SuccessMap&& success_transform, ErrorMap&& error_transform)
     {
-        auto success_map = Transform<SuccessF, SuccessThen, success_return_type, std::tuple<SuccessArgs...>>::map(
-            std::move(m_result_task.success_f), std::forward<SuccessThen>(success_then));
-        auto error_map = Transform<ErrorF, ErrorThen, error_return_type, std::tuple<ErrorArgs...>>::map(
-            std::move(m_result_task.error_f), std::forward<ErrorThen>(error_then));
+        auto success_map = Transform<SuccessF, SuccessMap, success_return_type, std::tuple<SuccessArgs...>>::map(
+            std::move(m_result_task.success_f), std::forward<SuccessMap>(success_transform));
+        auto error_map = Transform<ErrorF, ErrorMap, error_return_type, std::tuple<ErrorArgs...>>::map(
+            std::move(m_result_task.error_f), std::forward<ErrorMap>(error_transform));
 
         return std::make_shared<SharedStateTask<decltype(success_map),
                                                 decltype(error_map),
@@ -276,15 +278,15 @@ struct HelperCallTask<SuccessF, ErrorF, ErrorType, std::tuple<SuccessArgs...>>
     {
     }
 
-    template<typename SuccessThen, typename ErrorThen>
-    auto then(SuccessThen&& success_then, ErrorThen&& error_then) &&
+    template<typename SuccessMap, typename ErrorMap>
+    auto map(SuccessMap&& success_then, ErrorMap&& error_then) &&
     {
-        auto then_shared_state_task =
-            shared_state_task->then(std::forward<SuccessThen>(success_then), std::forward<ErrorThen>(error_then));
-        return HelperCallTask<typename decltype(then_shared_state_task)::element_type::success_f_type,
-                              typename decltype(then_shared_state_task)::element_type::error_f_type,
+        auto map_shared_state_task =
+            shared_state_task->map(std::forward<SuccessMap>(success_then), std::forward<ErrorMap>(error_then));
+        return HelperCallTask<typename decltype(map_shared_state_task)::element_type::success_f_type,
+                              typename decltype(map_shared_state_task)::element_type::error_f_type,
                               ErrorType,
-                              std::tuple<SuccessArgs...>>(std::move(then_shared_state_task));
+                              std::tuple<SuccessArgs...>>(std::move(map_shared_state_task));
     }
 
     void operator()(const ErrorType& ec, SuccessArgs... args)

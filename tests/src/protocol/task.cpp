@@ -27,7 +27,7 @@ TEST_CASE("Task test")
     auto my_task_5 =
         tsvetkov::make_asio_task([](std::string) { return std::make_pair(std::string("x"), std::string("y")); },
                                  [](const boost::system::error_code&) {})
-            .then([&is_call](std::pair<std::string, std::string>) { is_call = true; }, []() {});
+            .map([&is_call](std::pair<std::string, std::string>) { is_call = true; }, []() {});
 
     my_task_5(error_code, str);
 
