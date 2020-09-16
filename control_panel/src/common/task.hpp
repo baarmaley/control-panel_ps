@@ -170,6 +170,8 @@ struct SharedStateTask
 
 template<typename SuccessF, typename ErrorF, typename... SuccessArgs, typename... ErrorArgs>
 struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>
+    : std::enable_shared_from_this<
+          SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>>
 {
     using success_return_type = typename tsvetkov::traits::function_traits<SuccessF>::return_type;
     using error_return_type   = typename tsvetkov::traits::function_traits<ErrorF>::return_type;
@@ -182,6 +184,8 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
                                         ErrorF,
                                         std::tuple<SuccessArgs...>,
                                         std::tuple<ErrorArgs...>>;
+
+    using self_type = SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<ErrorArgs...>>;
 
     SharedStateTask(SuccessF&& success_f, ErrorF&& error_f) : m_result_task(std::move(success_f), std::move(error_f)) {}
 
@@ -243,6 +247,30 @@ struct SharedStateTask<SuccessF, ErrorF, std::tuple<SuccessArgs...>, std::tuple<
                                                                            std::move(error_map));
     }
 
+    template<typename SuccessThen /*, typename ErrorThen*/>
+    void then(SuccessThen&& success_then /*, ErrorThen&& error_then*/)
+    {
+        static_assert(std::is_same_v<std::remove_reference_t<decltype(*this)>, self_type>, "");
+
+        auto error_then = [](ErrorArgs...) {};
+
+        auto next_sst =
+            std::make_shared<SharedStateTask<SuccessThen,
+                                             decltype(error_then),
+                                             typename tsvetkov::traits::function_traits<SuccessThen>::arguments,
+                                             ErrorArgs...,
+                                             self_type>>(
+                std::forward<SuccessThen>(success_then), std::move(error_then), this->shared_from_this());
+
+        next_sst->m_prev_shared_state_task = [current_sst = this->shared_from_this(), next_sst] {
+            next_sst->m_result_task;
+        };
+        m_next_shared_state_task           = [current_sst = this->shared_from_this(), next_sst] {
+            // extract_task_result_to_next_task
+            current_sst->m_result_task;
+        };
+    }
+
 private:
     bool impl_is_ready() const
     {
@@ -256,6 +284,10 @@ private:
 
     std::mutex m_mutex;
     result_task_type m_result_task;
+
+    std::function<void()> m_prev_shared_state_task;
+    std::function<void()> m_next_shared_state_task;
+
     bool m_is_ready  = false;
     bool m_is_cancel = false;
 };
