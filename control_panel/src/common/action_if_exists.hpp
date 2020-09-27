@@ -71,7 +71,7 @@ auto impl_make_action(std::index_sequence<I...>, Context<ContextElement...>&& we
 }
 
 template<template<typename...> class Context, typename F, typename... ContextElement>
-auto action_if_exists(Context<ContextElement...>&& weak_context, F&& f)
+auto action_if_exists(Context<ContextElement...> weak_context, F&& f)
 {
     return impl_make_action(
         std::make_index_sequence<traits::function_traits<std::remove_reference_t<decltype(f)>>::arity -
@@ -85,7 +85,7 @@ template<template<typename...> class Context,
          typename ReturnType,
          typename... ContextElement,
          typename... Args>
-auto action_if_exists(Context<T, ContextElement...>&& weak_context, ReturnType (T::*action)(Args...))
+auto action_if_exists(Context<T, ContextElement...> weak_context, ReturnType (T::*action)(Args...))
 {
     return action_if_exists(std::move(weak_context),
                             [action](T* t, Args... args) { return (*t.*action)(std::forward<Args>(args)...); });
@@ -96,7 +96,7 @@ template<template<typename...> class Context,
          typename ReturnType,
          typename... ContextElement,
          typename... Args>
-auto action_if_exists(Context<T, ContextElement...>&& weak_context, ReturnType (T::*action)(Args...) const)
+auto action_if_exists(Context<T, ContextElement...> weak_context, ReturnType (T::*action)(Args...) const)
 {
     return action_if_exists(std::move(weak_context),
                             [action](T* t, Args... args) { return (*t.*action)(std::forward<Args>(args)...); });

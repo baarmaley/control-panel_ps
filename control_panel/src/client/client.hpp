@@ -4,14 +4,15 @@
 
 #pragma once
 
-#include "boost/asio.hpp"
+#include "asio.hpp"
+#include "portable_concurrency/future"
 
 #include "protocol/command_handler.hpp"
 
 #include <deque>
+#include <optional>
 
 namespace tsvetkov {
-namespace asio = boost::asio;
 
 struct Client : std::enable_shared_from_this<Client>
 {
@@ -23,7 +24,9 @@ struct Client : std::enable_shared_from_this<Client>
     Client& operator=(const Client&) = delete;
     Client& operator=(Client&&) = delete;
 
-    void connect();
+    pc::future<protocol::SmartPowerStatus> async_connect();
+    protocol::SmartPowerStatus connect();
+
     void disconnect();
 
     void send_all_on();
@@ -39,17 +42,31 @@ private:
         async_write();
     }
 
+    template<typename F>
+    auto async_post(F f)
+    {
+        return pc::async(client_strand, [f = std::forward<F>(f)] { f(); });
+    }
+
     void send_hello_request();
     void async_write();
     void async_read();
 
     std::uint32_t next_id();
 
+    asio::io_context& io_context;
+    asio::io_context::strand client_strand;
     asio::ip::tcp::socket socket;
     asio::ip::tcp::endpoint endpoint;
 
     asio::steady_timer reconnect_timer;
     asio::steady_timer ping_timer;
+
+    // Connection task
+    // step 1
+    std::optional<pc::promise<protocol::HelloResponse>> hello_response_promise;
+    // step 2
+    std::optional<pc::promise<protocol::SmartPowerStatus>> smart_power_status_promise;
 
     bool is_connected = false;
 
@@ -59,6 +76,7 @@ private:
     std::string accumulate_incoming_buffer;
 
     std::deque<std::string> output_buffer;
+    std::unordered_map<std::uint32_t, pc::future<void>> response;
 
     protocol::CommandHandler commandHandler;
 };

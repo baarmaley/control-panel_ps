@@ -2,8 +2,10 @@
 // Created by m.tsvetkov on 05.07.2020.
 //
 
-#include "boost/asio.hpp"
+//#include "boost/asio.hpp"
+#include "asio.hpp"
 #include "boost/endian/conversion.hpp"
+//#include "portable_concurrency/thread_pool"
 
 #include <cxxopts.hpp>
 
@@ -16,7 +18,7 @@
 #include <thread>
 
 namespace protocol = tsvetkov::protocol;
-namespace asio     = boost::asio;
+// namespace asio     = boost::asio;
 
 // TODO:
 // 1. Добавить пинг
@@ -51,6 +53,7 @@ int main(int argc, char** argv)
         asio::io_context io;
 
         tsvetkov::Menu menu;
+
         auto get_number = [] {
             std::string i;
             std::getline(std::cin, i);
@@ -59,19 +62,20 @@ int main(int argc, char** argv)
 
         auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
 
-        menu.add_item("All On", [&client, &io] { io.post([&client] { client->send_all_on(); }); });
-        menu.add_item("All Off", [&client, &io] { io.post([&client] { client->send_all_off(); }); });
+        menu.add_item("All On", [&client] { client->send_all_on(); });
+        menu.add_item("All Off", [&client] { client->send_all_off(); });
 
-        menu.add_item("Inversion", [&client, &io, &get_number] {
-            std::cout << "Enter pin: ";
-            std::size_t pin = get_number();
-            io.post([&client, pin] { client->inversion(pin); });
-        });
+        auto smart_power_status_future = client->async_connect();
 
-        auto worker = std::thread([&] {
-            client->connect();
-            io.run();
-        });
+        auto asio_worker = std::thread([&] { io.run(); });
+
+        auto smart_power_status = smart_power_status_future.get();
+
+        for (const auto& pair : smart_power_status.status) {
+            auto pin = pair.first;
+            menu.add_item("Inversion " + std::to_string(pin), [&client, pin] { client->inversion(pin); });
+        }
+        // smart_power_status_future.get();
 
         bool is_continue = true;
 
@@ -82,7 +86,7 @@ int main(int argc, char** argv)
             menu.item(i);
         }
 
-        worker.join();
+        asio_worker.join();
 
     } catch (const std::exception& e) {
         std::cout << "Error: " << e.what() << std::endl;

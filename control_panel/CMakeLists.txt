@@ -5,6 +5,7 @@ project(control_panel VERSION 0.1 LANGUAGES CXX)
 find_package(Boost)
 find_package(cxxopts CONFIG REQUIRED)
 find_package(Threads REQUIRED)
+find_package(asio)
 
 
 file(GLOB_RECURSE TARGET_SOURCES
@@ -35,6 +36,8 @@ target_link_libraries(control_panel_library
         PUBLIC
         tsvetkov::protocol
         Boost::boost
+        asio
+        portable_concurrency
         Threads::Threads)
 
 target_link_libraries(control_panel

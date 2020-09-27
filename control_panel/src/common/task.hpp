@@ -338,13 +338,13 @@ private:
 template<typename CompleteF, typename ErrorF>
 struct AsioTask : details::HelperCallTask<CompleteF,
                                           ErrorF,
-                                          boost::system::error_code,
+                                          std::error_code,
                                           typename tsvetkov::traits::function_traits<CompleteF>::arguments>
 {
     AsioTask(CompleteF&& complete, ErrorF&& error)
         : details::HelperCallTask<CompleteF,
                                   ErrorF,
-                                  boost::system::error_code,
+                                  std::error_code,
                                   typename tsvetkov::traits::function_traits<CompleteF>::arguments>(std::move(complete),
                                                                                                     std::move(error))
     {
