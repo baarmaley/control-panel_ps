@@ -8,8 +8,13 @@
 #include "common/function_traits.hpp"
 
 #include <boost/optional.hpp>
+#include <portable_concurrency/future>
 
 namespace tsvetkov {
+struct context_is_destroyed : std::exception
+{
+};
+
 template<typename F, typename Self, typename... Args>
 auto impl_call_action(F&& f, std::shared_ptr<Self>&& context, Args&&... args)
 {
@@ -46,6 +51,17 @@ struct return_type_helper<void>
 {
     using return_type = void;
     static void make_none() {}
+};
+
+template<typename T>
+struct return_type_helper<pc::future<T>>
+{
+    using return_type = pc::future<T>;
+    static pc::future<T> make_none() {
+        pc::promise<T> promise_result;
+        promise_result.set_exception(std::make_exception_ptr(context_is_destroyed{}));
+        return promise_result.get_future();
+    }
 };
 
 template<template<typename...> class Context, typename F, size_t... I, typename... ContextElement>

@@ -77,6 +77,35 @@ TEST_CASE("multictx")
         REQUIRE_FALSE(ctx_holder);
     }
 }
+TEST_CASE("pc action_if_exists")
+{
+    using namespace tsvetkov;
+    {
+        auto foo_1           = std::make_shared<Foo>();
+        auto foo_promise     = pc::promise<std::uint32_t>();
+        auto another_promise = pc::promise<std::string>();
+
+        auto foo_future = foo_promise.get_future().next(
+            action_if_exists(make_single_context(foo_1),
+                             [&another_promise](Foo* self, std::uint32_t) { return another_promise.get_future(); }));
+
+        foo_promise.set_value(123);
+        another_promise.set_value("123");
+        REQUIRE(foo_future.get() == "123");
+    }
+    {
+        auto foo_1           = std::make_shared<Foo>();
+        auto foo_promise     = pc::promise<std::uint32_t>();
+        auto another_promise = pc::promise<std::string>();
+
+        auto foo_future = foo_promise.get_future().next(
+            action_if_exists(make_single_context(foo_1),
+                             [&another_promise](Foo* self, std::uint32_t) { return another_promise.get_future(); }));
+        foo_1.reset();
+        foo_promise.set_value(123);
+        REQUIRE_THROWS_AS(foo_future.get(), context_is_destroyed);
+    }
+}
 
 TEST_CASE("action_if_exists")
 {

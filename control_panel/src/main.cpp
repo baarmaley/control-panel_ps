@@ -33,6 +33,8 @@ int main(int argc, char** argv)
     protocol::register_big_endian_to_native(&boost::endian::big_to_native);
     protocol::register_native_to_big_endian(&boost::endian::native_to_big);
 
+    std::string remote_address;
+    std::uint16_t port;
     try {
         cxxopts::Options options("control_panel", "Control remote unit");
         options.add_options()("ip", "remote address", cxxopts::value<std::string>())(
@@ -45,52 +47,59 @@ int main(int argc, char** argv)
             return 0;
         }
 
-        auto remote_address = result["ip"].as<std::string>();
-        std::uint16_t port  = result["port"].as<std::uint16_t>();
+        remote_address = result["ip"].as<std::string>();
+        port           = result["port"].as<std::uint16_t>();
 
         std::cout << "Client ip:" << remote_address << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Error: " << e.what() << std::endl;
+    }
 
-        asio::io_context io;
+    asio::io_context io;
+    asio::executor_work_guard<asio::io_context::executor_type> work_guard(io.get_executor());
+    auto asio_worker = std::thread([&] { io.run(); });
 
-        tsvetkov::Menu menu;
+    tsvetkov::Menu menu;
 
-        auto get_number = [] {
-            std::string i;
-            std::getline(std::cin, i);
-            return static_cast<std::uint32_t>(std::stoi(i));
-        };
+    auto get_number = [] {
+        std::string i;
+        std::getline(std::cin, i);
+        return static_cast<std::uint32_t>(std::stoi(i));
+    };
 
-        auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
+    auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
 
-        menu.add_item("All On", [&client] { client->send_all_on(); });
-        menu.add_item("All Off", [&client] { client->send_all_off(); });
+    menu.add_item("All On", [&client] { client->send_all_on(); });
+    menu.add_item("All Off", [&client] { client->send_all_off(); });
 
-        auto smart_power_status_future = client->async_connect();
+    auto smart_power_status_future = client->async_connect();
 
-        auto asio_worker = std::thread([&] { io.run(); });
-
+    try {
         auto smart_power_status = smart_power_status_future.get();
-
         for (const auto& pair : smart_power_status.status) {
             auto pin = pair.first;
             menu.add_item("Inversion " + std::to_string(pin), [&client, pin] { client->inversion(pin); });
         }
-        // smart_power_status_future.get();
-
-        bool is_continue = true;
-
-        while (is_continue) {
-            std::cout << menu.str();
-            std::size_t i = get_number();
-            std::cout << "selected: " << i << std::endl;
-            menu.item(i);
-        }
-
-        asio_worker.join();
-
     } catch (const std::exception& e) {
-        std::cout << "Error: " << e.what() << std::endl;
+        std::cout << "Connection error: " << e.what() << std::endl;
     }
+
+    bool is_continue = true;
+
+    menu.add_item("Exit", [&] { is_continue = false; });
+    menu.add_item("Test", [&] { client.reset(); });
+
+
+    while (is_continue) {
+        std::cout << menu.str();
+        std::size_t i = get_number();
+        std::cout << "selected: " << i << std::endl;
+        menu.item(i);
+    }
+
+    work_guard.reset();
+    io.stop();
+    asio_worker.join();
 
     return 0;
 }
