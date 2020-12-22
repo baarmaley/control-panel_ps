@@ -1,3 +1,7 @@
 [submodule "my_smart_power"]
 	path = my_smart_power
 	url = https://github.com/baarmaley/ps_firmware
+
+[submodule "portable_concurrency"]
+	path = portable_concurrency
+	url = https://github.com/baarmaley/portable_concurrency
