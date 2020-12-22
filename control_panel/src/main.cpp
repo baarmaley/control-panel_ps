@@ -10,6 +10,7 @@
 #include <cxxopts.hpp>
 
 #include "client/client.hpp"
+#include "client_finder/client_finder.hpp"
 #include "menu/menu.hpp"
 #include "protocol/protocol.hpp"
 
@@ -21,17 +22,15 @@ namespace protocol = tsvetkov::protocol;
 // namespace asio     = boost::asio;
 
 // TODO:
-// 1. Добавить пинг
-// 1. Добавить протокол обнаружения устройств
 // 1. Cохранение параметров в фс на устройстве
-// 1. Добавить переподключение к устройству
-// 1. Добавить меню
 // 1. Оформить как библиотеку
 
 int main(int argc, char** argv)
 {
-    protocol::register_big_endian_to_native(&boost::endian::big_to_native);
-    protocol::register_native_to_big_endian(&boost::endian::native_to_big);
+    protocol::register_big_endian_to_native_32(&boost::endian::big_to_native);
+    protocol::register_native_to_big_endian_32(&boost::endian::native_to_big);
+    protocol::register_big_endian_to_native_16(&boost::endian::big_to_native);
+    protocol::register_native_to_big_endian_16(&boost::endian::native_to_big);
 
     std::string remote_address;
     std::uint16_t port;
@@ -67,7 +66,29 @@ int main(int argc, char** argv)
         return static_cast<std::uint32_t>(std::stoi(i));
     };
 
-    auto client = std::make_shared<tsvetkov::Client>(io, remote_address, port);
+    auto found_device = [&] {
+        auto client_finder = std::make_shared<tsvetkov::ClientFinder>(io);
+
+        auto found_device_promise = std::make_shared<pc::promise<tsvetkov::FoundDevice>>();
+        auto found_device_future  = found_device_promise->get_future();
+
+        client_finder->subscribe_to_found_new_device_event(tsvetkov::action_if_exists(
+            tsvetkov::make_single_context(client_finder),
+            [found_device_promise = std::move(found_device_promise)](tsvetkov::ClientFinder* self,
+                                                                     tsvetkov::FoundDevice found_device) mutable {
+                if (found_device_promise) {
+                    std::cout << "Found device!!! ip: " << found_device.ip_address << std::endl;
+                    found_device_promise->set_value(std::move(found_device));
+                    found_device_promise.reset();
+                    self->stop();
+                }
+            }));
+
+        client_finder->start();
+        return found_device_future.get();
+    }();
+
+    auto client = std::make_shared<tsvetkov::Client>(io, found_device.ip_address, port);
 
     menu.add_item("All On", [&client] { client->send_all_on(); });
     menu.add_item("All Off", [&client] { client->send_all_off(); });
@@ -88,7 +109,6 @@ int main(int argc, char** argv)
 
     menu.add_item("Exit", [&] { is_continue = false; });
     menu.add_item("Test", [&] { client.reset(); });
-
 
     while (is_continue) {
         std::cout << menu.str();

@@ -111,7 +111,7 @@ void Client::impl_async_connect()
                 std::cout << "Connection error: context is destroyed" << std::endl;
             } catch (const std::system_error& e) {
                 std::cout << "Connection system_error: " << e.what() << std::endl;
-                action_if_exists(single_ctx, &Client::system_error_handle)(e, [single_ctx](Client* self) {
+                action_if_exists(single_ctx, &Client::system_error_filter)(e, [single_ctx](Client* self) {
                     auto reconnect_timer = std::make_shared<asio::steady_timer>(self->io_context);
                     reconnect_timer->expires_after(std::chrono::seconds(5));
                     reconnect_timer->async_wait(use_future)
@@ -199,7 +199,7 @@ void Client::async_write()
                 future.get();
             } catch (const std::system_error& e) {
                 std::cout << "async_write system_error: " << e.what() << std::endl;
-                action_if_exists(single_ctx, &Client::system_error_handle)(e, [](Client* self) {
+                action_if_exists(single_ctx, &Client::system_error_filter)(e, [](Client* self) {
                     self->impl_disconnect();
                     self->reconnect();
                 });
@@ -255,7 +255,7 @@ void Client::async_read()
                 future.get();
             } catch (const std::system_error& e) {
                 std::cout << "async read system_error: " << e.what() << std::endl;
-                action_if_exists(single_ctx, &Client::system_error_handle)(e, [](Client* self) {
+                action_if_exists(single_ctx, &Client::system_error_filter)(e, [](Client* self) {
                     self->impl_disconnect();
                     self->reconnect();
                 });
@@ -290,7 +290,7 @@ void Client::start_ping()
 
 void Client::reconnect()
 {
-    if (connections_to_client.size() > 0) {
+    if (!connections_to_client.empty()) {
         return;
     }
     async_connect().detach();

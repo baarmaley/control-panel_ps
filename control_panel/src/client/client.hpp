@@ -92,7 +92,7 @@ private:
     void start_ping();
     void reconnect();
 
-    void system_error_handle(const std::system_error& error, std::function<void(Client*)> f){
+    void system_error_filter(const std::system_error& error, std::function<void(Client*)> f){
         if (error.code() == asio::error::basic_errors::operation_aborted) {
             return;
         }
